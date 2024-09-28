@@ -1,0 +1,77 @@
+otu <- read.csv(file = "C:\\Users\\westk4\\Desktop\\dataoutput\\all_lulu_97.csv", header = T, row.names = 1, comment.char = "")
+tax <- read.csv(file = "C:\\Users\\westk4\\Desktop\\dataoutput\\species_97.csv", header = T ,row.names = 1, na.strings = "")
+
+tax.clean <- data.frame(row.names = row.names(tax),
+                        Genus = str_replace(tax[,1], "g__",""),
+                        Species = str_replace(tax[,2], "s__",""),
+                        stringsAsFactors = FALSE)
+
+metadata <- read.csv(file = "C:\\Users\\westk4\\Desktop\\dataoutput\\metadata.csv", sep = ",", header = T, row.names = 1)
+OTU = otu_table(as.matrix(otu), taxa_are_rows = TRUE)
+TAX = tax_table(as.matrix(tax))
+SAMPLE <- sample_data(metadata)
+# merge the data
+ps <- phyloseq(OTU, TAX, SAMPLE)
+
+# Choose comparison groups
+comp1 <- c("A", "B", "C", "D")
+comp2 <- c(“A”, “B”, “D”, “E”)
+ps_comp1 <- subset_samples(ps, Comp %in% comp1)
+ps_comp2 <- subset_samples(ps, Comp %in% comp2)
+
+
+Rarefying
+set.seed(111) # keep result reproductive
+ps.rarefied = rarefy_even_depth(ps, rngseed=1, sample.size=221, replace=F)
+
+
+ALPHA DIVERSITY
+plot_richness(ps.rarefied, x="Comp", measures=c("Observed", "Shannon")) +
+  geom_boxplot() +
+  theme_classic() +
+  theme(strip.background = element_blank(), axis.text.x.bottom = element_text(angle = -90))
+
+ABUNDANCE
+# Combine multiple samples into the same bar (Must combine samples FIRST)
+ps_comb <- merge_samples(ps_comp1, "Comp")
+
+ps.rel = transform_sample_counts(ps_comb, function(x) x/sum(x)*100)
+# Change from total abundance to relative
+ps_rel_abund = phyloseq::transform_sample_counts(ps.rel_comb, function(x){x / sum(x)})
+phyloseq::otu_table(ps)[1:5, 1:5]
+# agglomerate taxa
+glom <- tax_glom(ps.rel, taxrank = 'Genus', NArm = FALSE)
+ps.melt <- psmelt(glom)
+# change to character for easy-adjusted level
+ps.melt$Genus <- as.character(ps.melt$Genus)
+
+ps.melt <- ps.melt %>%
+  group_by(Comp, Genus) %>%
+  mutate(median=median(Abundance))
+# select group median > 1
+keep <- unique(ps.melt$Genus[ps.melt$median > 1])
+ps.melt$Genus[!(ps.melt$Genus %in% keep)] <- "< 1%"
+#to get the same rows together
+ps.melt_sum <- ps.melt %>%
+  group_by(Sample,Comp,Genus) %>%
+  summarise(Abundance=sum(Abundance))
+
+ggplot(ps.melt_sum, aes(x = Sample, y = Abundance, fill = Genus)) + 
+  geom_bar(stat = "identity", aes(fill=Genus)) + 
+  labs(x="", y="%") +
+  facet_wrap(~Comp, scales= "free_x", nrow=1) +
+  theme_classic() + 
+  theme(strip.background = element_blank(), 
+        axis.text.x.bottom = element_text(angle = -90))
+
+#merged_ps <- phyloseq::merge_samples(ps.melt_sum, "Comp")
+merged_ps <- merge_samples(ps.melt_sum, “Comp”)
+merged_ps <- phyloseq::merge_samples2(ps.melt, "Comp")
+
+
+NMDS and ANOSIM
+dist = phyloseq::distance(ps.rarefied, method="jaccard", binary = TRUE)
+ordination = ordinate(ps.rarefied, method="NMDS", distance=dist)
+plot_ordination(ps.rarefied, ordination, color="Comp") + 
+  theme_classic() +
+  theme(strip.background = element_blank())
